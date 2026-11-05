@@ -1,0 +1,99 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+: "${TRIM_APPDEST:?Missing application directory}"
+: "${TRIM_PKGVAR:?Missing application data directory}"
+: "${TRIM_USERNAME:?Missing package user}"
+BIN="${TRIM_APPDEST}/server/switchhosts-fnos"
+RUN_DIR=/run/switchhosts-fnos
+GATEWAY="${TRIM_APPDEST}/app.sock"
+
+fail() {
+    printf '%s\n' "$1" >&2
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; fi
+    exit 1
+}
+
+[ "$(id -u)" = 0 ] || fail 'FN-SwitchHosts lifecycle requires root to start the restricted hosts writer.'
+[ ! -L "$RUN_DIR" ] || fail 'Unexpected runtime directory symlink.'
+install -d -m 0711 -o root -g root "$RUN_DIR"
+# Serialize application-center start / stop / status calls.
+exec 9>"${RUN_DIR}/lifecycle.lock"
+flock -x 9
+
+alive() {
+    local role="$1" pid ticks current_ticks
+    [ -f "${RUN_DIR}/${role}.pid" ] || return 1
+    read -r pid ticks < "${RUN_DIR}/${role}.pid" || return 1
+    [[ "$pid" =~ ^[0-9]+$ && "$ticks" =~ ^[0-9]+$ ]] || return 1
+    [ -r "/proc/${pid}/stat" ] || return 1
+    [ "$(readlink -f "/proc/${pid}/exe" 2>/dev/null)" = "$(readlink -f "$BIN")" ] || return 1
+    current_ticks="$(awk '{print $22}' "/proc/${pid}/stat" 2>/dev/null)" || return 1
+    [ "$current_ticks" = "$ticks" ] || return 1
+}
+
+record() {
+    local role="$1" pid="$2"
+    [ -r "/proc/${pid}/stat" ] || fail "The ${role} process exited during startup."
+    printf '%s %s\n' "$pid" "$(awk '{print $22}' "/proc/${pid}/stat")" > "${RUN_DIR}/${role}.pid"
+}
+
+stop_one() {
+    local role="$1" pid ticks
+    if alive "$role"; then
+        read -r pid ticks < "${RUN_DIR}/${role}.pid"
+        kill -TERM "$pid"
+        for _ in {1..30}; do
+            if ! alive "$role"; then break; fi
+            sleep 0.2
+        done
+        if alive "$role"; then kill -KILL "$pid"; fi
+    fi
+    rm -f -- "${RUN_DIR}/${role}.pid"
+}
+
+stop_all() {
+    stop_one web
+    stop_one writer
+    rm -f -- "$GATEWAY" "${RUN_DIR}/writer.sock"
+}
+
+case "${1:-}" in
+    start)
+        if alive web && alive writer; then exit 0; fi
+        stop_all
+        [ -x "$BIN" ] || fail 'FN-SwitchHosts Linux service binary is missing.'
+        package_uid="$(id -u "$TRIM_USERNAME")"
+        package_gid="$(id -g "$TRIM_USERNAME")"
+        [ "$package_uid" != 0 ] && [ "$package_gid" != 0 ] || fail 'A non-root package user is required.'
+        # fnOS may install target as the package user. Its gateway protocol
+        # requires app.sock here, so secure this directory before binding it.
+        # Resolve the framework's target symlink; do not recursively change
+        # ownership or touch the separately managed writable package data.
+        app_dir="$(readlink -f -- "$TRIM_APPDEST")"
+        [ -d "$app_dir" ] || fail 'Application target directory is missing.'
+        chown root:root -- "$app_dir"
+        chmod go-w -- "$app_dir"
+        # Create data as the package user; root never follows writable data paths.
+        runuser -u "$TRIM_USERNAME" -- mkdir -p "${TRIM_PKGVAR}/data"
+        "$BIN" --writer --socket "${RUN_DIR}/writer.sock" --uid "$package_uid" --gid "$package_gid" > "${RUN_DIR}/writer.log" 2>&1 9>&- &
+        record writer "$!"
+        for _ in {1..30}; do
+            if [ -S "${RUN_DIR}/writer.sock" ]; then break; fi
+            sleep 0.2
+        done
+        if ! alive writer || [ ! -S "${RUN_DIR}/writer.sock" ]; then stop_all; fail 'Hosts writer failed to start; see /run/switchhosts-fnos/writer.log.'; fi
+        "$BIN" --data-dir "${TRIM_PKGVAR}/data" --gateway-socket "$GATEWAY" --writer-socket "${RUN_DIR}/writer.sock" --uid "$package_uid" --gid "$package_gid" > "${RUN_DIR}/web.log" 2>&1 9>&- &
+        record web "$!"
+        for _ in {1..30}; do
+            if [ -S "$GATEWAY" ]; then break; fi
+            sleep 0.2
+        done
+        sleep 0.3
+        if ! alive web || [ ! -S "$GATEWAY" ]; then stop_all; fail 'Web service failed to start; see /run/switchhosts-fnos/web.log.'; fi
+        ;;
+    stop) stop_all ;;
+    status) if alive web && alive writer; then exit 0; else exit 3; fi ;;
+    *) exit 1 ;;
+esac

@@ -15,6 +15,7 @@
 
 pub mod aggregate;
 pub mod cmd_runner;
+pub(crate) mod content;
 pub mod elevation;
 pub mod error;
 pub mod helper_admin;

@@ -1,0 +1,5 @@
+#!/bin/bash
+set -euo pipefail
+/var/apps/switchhosts/cmd/main stop
+# Uninstall deliberately leaves system hosts intact. Restore the desired
+# snapshot in the application before uninstalling if a rollback is needed.

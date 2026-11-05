@@ -1,0 +1,15 @@
+{
+  ".url": {
+    "switchhosts.main": {
+      "title": "FN-SwitchHosts",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/switchhosts",
+      "gatewaySocket": "app.sock",
+      "url": "/app/switchhosts/",
+      "allUsers": false,
+      "control": { "accessPerm": "readonly" }
+    }
+  }
+}

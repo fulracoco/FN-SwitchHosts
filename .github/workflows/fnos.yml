@@ -1,0 +1,51 @@
+name: fnOS service
+
+on:
+  pull_request:
+    paths: ['fnos/**', 'src-tauri/src/hosts_text.rs', 'src-tauri/src/hosts_apply/content.rs', '.github/workflows/fnos.yml']
+  push:
+    paths: ['fnos/**', 'src-tauri/src/hosts_text.rs', 'src-tauri/src/hosts_apply/content.rs', '.github/workflows/fnos.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: fnos/server -> target
+      - run: cargo fmt --manifest-path fnos/server/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path fnos/server/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path fnos/server/Cargo.toml
+      - run: cargo build --release --locked --manifest-path fnos/server/Cargo.toml
+      - uses: actions/upload-artifact@v6
+        with:
+          name: FN-SwitchHosts-linux-x86_64
+          path: fnos/server/target/release/switchhosts-fnos
+
+  static-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: fnos/server -> target
+      - name: Install musl compiler
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked --manifest-path fnos/server/Cargo.toml --target x86_64-unknown-linux-musl
+      - name: Test production processes in a private mount namespace
+        run: sudo bash fnos/scripts/smoke-linux.sh fnos/server/target/x86_64-unknown-linux-musl/release/switchhosts-fnos
+      - uses: actions/upload-artifact@v6
+        with:
+          name: FN-SwitchHosts-linux-x86_64-static
+          path: fnos/server/target/x86_64-unknown-linux-musl/release/switchhosts-fnos

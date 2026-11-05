@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FN-SwitchHosts</title>
+  <base href="/app/switchhosts/">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header><div class="brand"><span class="logo">S</span><div><h1>FN-SwitchHosts</h1><p>管理 NAS 本机的 hosts 方案</p></div></div><div class="toolbar"><button id="reload">刷新状态</button><button id="export">导出方案</button><label class="button">导入方案<input id="import" type="file" accept="application/json,.json" hidden></label></div></header>
+  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <section id="authentication" hidden><h2>连接管理服务</h2><p>飞牛版需要管理员登录。本地开发请填写启动时设置的访问令牌。</p><form id="token-form"><input id="token" type="password" autocomplete="off" placeholder="本地开发访问令牌" aria-label="本地开发访问令牌"><button class="primary">连接</button></form></section>
+  <section id="recovery" class="warning" hidden><h2>有一次写入需要恢复</h2><p>先核对系统 hosts。可以重新核对写入结果；如果文件已被其他程序修改，也可以保留当前文件并暂停全部方案。</p><button id="reconcile">核对写入结果</button><button id="keep-current">保留当前 hosts 并暂停方案</button></section>
+  <main>
+    <aside><div class="section-heading"><h2>方案</h2><button id="new" class="primary">＋ 新建</button></div><p class="hint">开启的方案会按列表顺序合并。订阅由后台定时刷新。</p><div id="entries"></div><p id="empty" class="empty">还没有方案。新建一个，开始管理。</p></aside>
+    <section class="workspace"><nav aria-label="查看内容"><button id="tab-editor" class="active">编辑方案</button><button id="tab-system">系统 hosts</button><button id="tab-history">历史恢复</button></nav>
+      <div id="editor-panel"><form id="editor"><div class="section-heading"><h2 id="editor-heading">新建方案</h2><label class="switch"><input id="enabled" type="checkbox">启用并应用</label></div><label>名称<input id="title" required maxlength="100" placeholder="例如：开发环境"></label><div class="subscription"><label>订阅地址（可选）<input id="url" type="url" placeholder="https://example.com/hosts" maxlength="4096"></label><label>刷新间隔（分钟）<input id="interval" type="number" min="0" max="43200" step="1" value="0"><small>0 表示仅手动刷新</small></label></div><label>hosts 内容<textarea id="content" spellcheck="false" placeholder="192.168.1.20  dev.example.test"></textarea></label><p id="subscription-status" class="hint"></p><div class="editor-footer"><span id="draft-status" class="hint">保存已启用的方案会立即应用。</span><div><button id="delete" type="button" class="danger" hidden>删除方案</button><button id="refresh-subscription" type="button" hidden>刷新订阅</button><button type="submit" class="primary">保存方案</button></div></div></form></div>
+      <div id="system-panel" hidden><div class="section-heading"><h2>NAS 系统 hosts</h2><span class="badge">/etc/hosts</span></div><p class="hint">仅管理本机解析。容器与局域网其他设备的解析规则需要单独配置。</p><pre id="system-content" tabindex="0"></pre></div>
+      <div id="history-panel" hidden><h2>历史恢复</h2><p class="hint">保留最近 100 个不同的文件快照。恢复会替换整个 hosts 文件，并暂停全部方案。</p><label>选择快照<select id="history-select"></select></label><pre id="history-content" tabindex="0"></pre><button id="restore" class="danger">恢复此快照</button></div>
+    </section>
+  </main>
+  <footer>追加写入会保留 FN-SwitchHosts 管理段之外的内容。关闭网页后，后台订阅任务仍会继续。</footer>
+</body>
+</html>

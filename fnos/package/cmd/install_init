@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+for command in runuser flock id install readlink awk chown chmod; do
+    command -v "$command" >/dev/null || {
+        printf 'Required command is missing: %s\n' "$command" > "${TRIM_TEMP_LOGFILE:?}"
+        exit 1
+    }
+done

@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+/var/apps/switchhosts/cmd/main stop
