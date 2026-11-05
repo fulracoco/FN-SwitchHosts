@@ -4,8 +4,15 @@ on:
   pull_request:
     paths: ['fnos/**', 'src-tauri/src/hosts_text.rs', 'src-tauri/src/hosts_apply/content.rs', '.github/workflows/fnos.yml']
   push:
+    branches: ['**']
+    tags: ['fnos-v*']
     paths: ['fnos/**', 'src-tauri/src/hosts_text.rs', 'src-tauri/src/hosts_apply/content.rs', '.github/workflows/fnos.yml']
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish a fnOS preview release using the package manifest version'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,3 +56,65 @@ jobs:
         with:
           name: FN-SwitchHosts-linux-x86_64-static
           path: fnos/server/target/x86_64-unknown-linux-musl/release/switchhosts-fnos
+      - name: Install fnpack 1.2.3
+        run: |
+          curl --fail --location --retry 3 https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64 -o "$RUNNER_TEMP/fnpack"
+          echo "54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93  $RUNNER_TEMP/fnpack" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/fnpack"
+      - name: Package static x86_64 FPK
+        env:
+          SWH_TARGET: x86_64-unknown-linux-musl
+          SWH_BINARY: ${{ github.workspace }}/fnos/server/target/x86_64-unknown-linux-musl/release/switchhosts-fnos
+          FNPACK: ${{ runner.temp }}/fnpack
+        run: bash fnos/scripts/build.sh
+      - uses: actions/upload-artifact@v6
+        with:
+          name: FN-SwitchHosts-fpk-x86_64
+          path: dist/fnos/x86_64-unknown-linux-musl/FN-SwitchHosts.fpk
+          if-no-files-found: error
+
+  release:
+    needs: [test, static-linux]
+    if: startsWith(github.ref, 'refs/tags/fnos-v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    concurrency:
+      group: fnos-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v7
+        with:
+          name: FN-SwitchHosts-fpk-x86_64
+          path: release-assets
+      - name: Publish fnOS preview release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          VERSION=$(awk -F '[[:space:]]*=[[:space:]]*' '$1 == "version" { print $2 }' fnos/package/manifest)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid fnOS package version' >&2; exit 1; }
+          TAG="fnos-v$VERSION"
+          if [[ "$RELEASE_REF" == refs/tags/* && "$RELEASE_REF" != "refs/tags/$TAG" ]]; then
+            echo "Tag must match fnos/package/manifest: $TAG" >&2
+            exit 1
+          fi
+          # A manually dispatched run must not attach a new build to an older tag.
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+            [[ "$(git rev-parse "$TAG^{commit}")" == "$RELEASE_SHA" ]] || { echo 'Release tag points to another commit' >&2; exit 1; }
+          fi
+          cd release-assets
+          mv FN-SwitchHosts.fpk "FN-SwitchHosts-$VERSION-x86_64.fpk"
+          sha256sum ./*.fpk > SHA256SUMS
+          cat > "$RUNNER_TEMP/fnos-release-notes.md" <<'EOF'
+          fnOS 开发预览版，适用于 x86_64 飞牛 NAS。下载 .fpk 文件后在应用中心手动安装。
+
+          服务使用 musl 静态构建，不依赖 NAS 的 glibc；HTTPS 订阅需要系统 CA 证书。
+          版本功能、部署与使用说明请参阅仓库中的 fnos/README.md。
+          EOF
+          gh release create "$TAG" ./*.fpk SHA256SUMS --target "$RELEASE_SHA" --title "FN-SwitchHosts $VERSION" --prerelease --notes-file "$RUNNER_TEMP/fnos-release-notes.md"

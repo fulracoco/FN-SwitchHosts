@@ -65,6 +65,17 @@ SWH_TARGET=x86_64-unknown-linux-musl bash fnos/scripts/build.sh
 
 本次开发已生成并通过隔离生产进程测试的静态预览包位于 `dist/fnos/x86_64-unknown-linux-musl/FN-SwitchHosts.fpk`，不依赖目标 NAS 的 glibc。动态 GNU 预览包要求 glibc >= 2.38，优先使用静态包。静态包仍需目标 NAS 上的系统 CA 证书来验证 HTTPS 订阅。
 
+## GitHub 构建与发布
+
+`fnOS service` 工作流会在测试和隔离生产进程验证后生成静态 x86_64 安装包，位于该次运行的 `FN-SwitchHosts-fpk-x86_64` Artifact 中。普通代码推送只生成构建产物。
+
+发布开发预览版可使用以下任一方式：
+
+- 在 Actions 中手动运行 `fnOS service`，选择要发布的分支并勾选 `publish_release`。
+- 推送与 `fnos/package/manifest` 版本一致的标签，例如 `fnos-v0.1.3`。
+
+两项检查任务全部成功后，工作流创建 GitHub 预发布版本，附带 `FN-SwitchHosts-版本号-x86_64.fpk` 和 `SHA256SUMS`。版本号来自 FPK manifest，与桌面版和服务 crate 的版本独立；发布新版本前需先更新 manifest。已有版本不会被覆盖。`fnos-v*` 标签不会触发桌面版的 `v*` 发布流程。
+
 ## fnOS 部署模型
 
 ```text
